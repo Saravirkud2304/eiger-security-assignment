@@ -1,0 +1,57 @@
+services:
+  web:
+    build: .
+    # Safe local default: reachable only from this host. For an isolated lab LAN,
+    # set EIGER_WEB_BIND to the host's private-LAN address explicitly.
+    ports: ["${EIGER_WEB_BIND:-127.0.0.1}:8000:8000"]
+    environment:
+      HALCYON_MODE: ${HALCYON_MODE:-vulnerable}
+      DATABASE_URL: postgresql://halcyon:halcyon@db:5432/halcyon
+      OLLAMA_URL: http://ollama:11434
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-llama3.1:8b}
+      DEFAULT_PROVIDER: local
+      # MCP servers are discovered from mcp.json (baked into the image). Uncomment to
+      # override per server, e.g. to point at externally-hosted MCP endpoints:
+      # MCP_CORE_URL: http://mcp-core-banking:9001/mcp
+      # MCP_CRM_URL: http://mcp-crm:9002/mcp
+    depends_on:
+      db:
+        condition: service_healthy
+      ollama:
+        condition: service_started
+      mcp-core-banking:
+        condition: service_started
+      mcp-crm:
+        condition: service_started
+  mcp-core-banking:
+    build: .
+    command: uv run uvicorn halcyon.mcp_deploy:CORE_ASGI --host 0.0.0.0 --port 9001
+    # Host-local for MCP Inspector. Deliberate LAN exposure requires setting
+    # EIGER_MCP_BIND to a private-LAN address; never expose this to the internet.
+    ports: ["${EIGER_MCP_BIND:-127.0.0.1}:9001:9001"]
+    environment:
+      HALCYON_MODE: ${HALCYON_MODE:-vulnerable}
+  mcp-crm:
+    build: .
+    command: uv run uvicorn halcyon.mcp_deploy:CRM_ASGI --host 0.0.0.0 --port 9002
+    ports: ["${EIGER_MCP_BIND:-127.0.0.1}:9002:9002"]
+    environment:
+      HALCYON_MODE: ${HALCYON_MODE:-vulnerable}
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: halcyon
+      POSTGRES_PASSWORD: halcyon
+      POSTGRES_DB: halcyon
+    volumes: ["pgdata:/var/lib/postgresql/data"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U halcyon -d halcyon"]
+      interval: 2s
+      timeout: 3s
+      retries: 20
+  ollama:
+    image: ollama/ollama:latest
+    volumes: ["ollama:/root/.ollama"]
+volumes:
+  pgdata:
+  ollama:
